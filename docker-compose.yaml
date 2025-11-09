@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+      MONGO_INITDB_DATABASE: restorator
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    restart: always
+    command: >
+      sh -c "redis-server --requirepass $$REDIS_PASSWORD --appendonly yes"
+    environment:
+      - REDIS_PASSWORD=123456
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis-data:/data
+
+volumes:
+  mongodb_data:
+  redis-data:
+
