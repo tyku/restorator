@@ -1,2 +1,2 @@
-export const OPEN_ROUTER_PROVIDER_TOKEN = 'open_router_provider';
+export const REPLICATE_PROVIDER_TOKEN = 'replicate_provider';
 

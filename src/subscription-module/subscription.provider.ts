@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { SubscriptionRepository } from './subscription.repository';
 import {LoggerProvider} from "../logger-module/logger.provider";
+import { EmptyBalanceException } from './errors/empty-balance.error';
 
 @Injectable()
 export class SubscriptionProvider {
@@ -14,8 +15,6 @@ export class SubscriptionProvider {
       return await this.subscriptionRepo.findOneAndUpdate(filter, update).lean().exec();
     } catch(e) {
       this.logger.error(`${this.constructor.name} createOrUpdate: something went wrong (error=${e})`);
-
-      throw new Error(`Something went wrong (error=${e})`)
     }
   }
 
@@ -29,18 +28,26 @@ export class SubscriptionProvider {
   }
 
   add(chatId: number, amount: number) {
-    return this.subscriptionRepo.findOneAndUpdate({ chatId }, { balance: { $inc: amount } })
+    return this.subscriptionRepo.findOneAndUpdate({ chatId }, { $inc: { balance: amount } })
   }
 
   async sub(chatId: number, amount: number = 1) {
-    const actualBalance = await this.subscriptionRepo.findOne({ chatId }, { 'balance': 1 }).lean().exec();
+    const actualBalance = await this.subscriptionRepo.findOne({ chatId, balance: { $gt: 0 } }, { 'balance': 1 }).lean().exec();
 
     if (!actualBalance || actualBalance.balance <= 0) {
       this.logger.error(`Balance less or equal 0 (chatId=${chatId})`);
 
-      throw new Error(`Balance less or equal 0 (chatId=${chatId})`);
+      // throw new EmptyBalanceException(`Balance less or equal 0 (chatId=${chatId})`);
+
+      return;
     }
 
-    return this.subscriptionRepo.findOneAndUpdate({ chatId }, { balance: { $dec: amount } })
+    return this.subscriptionRepo.findOneAndUpdate({ _id: actualBalance._id, chatId }, { $inc: { balance: -amount } })
+  }
+
+  async getBalance(chatId: number) {
+    const actualBalances = await this.subscriptionRepo.find({ chatId }, { 'balance': 1 }).lean().exec();
+
+    return actualBalances.reduce((acc, curr) => acc + curr.balance, 0);
   }
 }

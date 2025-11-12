@@ -1,7 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 
-// import * as providers from './providers';
+import * as providers from './providers';
 
 const DEFAULT_SERVICE_TIMEOUT = 10000;
 const DEFAULT_SERVICE_REDIRECTS = 5;
@@ -14,7 +14,7 @@ const DEFAULT_SERVICE_REDIRECTS = 5;
       maxRedirects: DEFAULT_SERVICE_REDIRECTS,
     }),
   ],
-  // providers: [...Object.values(providers)],
-  // exports: [...Object.values(providers)],
+  providers: [...Object.values(providers)],
+  exports: [...Object.values(providers)],
 })
 export class ServicesModule {}

@@ -1,8 +1,9 @@
+import * as process from 'node:process';
+
 import telegramConfig from './telegram.config';
 import mongoConfig from './mongo.config';
 import redisConfig from './redis.config';
-import openRouterConfig from './open-router.config';
-import * as process from 'node:process';
+import replicateConfig from './replicate.config';
 
 export default () => ({
   port: process.env.PORT,
@@ -11,5 +12,5 @@ export default () => ({
   ...redisConfig(),
   ...mongoConfig(),
   ...telegramConfig(),
-  ...openRouterConfig(),
+  ...replicateConfig(),
 });

@@ -2,21 +2,21 @@ import { Input, Scenes } from 'telegraf';
 import {Action, Ctx, Message, Scene, SceneEnter} from 'nestjs-telegraf';
 import * as path from "node:path";
 
-
-
+import { LoggerProvider } from '../../logger-module/logger.provider';
 import { SubscriptionProvider } from '../../subscription-module/subscription.provider';
 import { escapeText } from '../libs/escape-text';
 import { UserProvider } from '../../user-module/user.provider';
+import { ESubscriptionType } from '../../subscription-module/constants/types';
 
 import type { InputMediaPhoto } from 'telegraf/types';
 import type { TMessageType } from '../types/message';
-import {ESubscriptionType} from "../../subscription-module/constants/types";
 
 @Scene('NEWUSER_SCENE_ID')
 export class NewUserProvider {
     constructor(
         private userProvider: UserProvider,
         private subscriptionProvider: SubscriptionProvider,
+        private logger: LoggerProvider,
     ) {
     }
 
@@ -67,40 +67,54 @@ export class NewUserProvider {
             await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
             await ctx.telegram.sendMediaGroup(chatId, mediaGroup2);
 
+            const balance = await this.subscriptionProvider.getBalance(chatId);
+
             await ctx.replyWithMarkdownV2(
-                escapeText('Ты можешь обработать до 3 фотографий бесплатно — результат будет с небольшим водяным знаком.\n\n' +
-                    'Хочешь без водяного знака и в лучшем качестве? ✨\n' +
-                    'Обработка без водяного знака доступна за 10 звёзд за одно фото, можешь скидывать их сразу пачкой.'),
+                escapeText(`💰 Текущий баланс: 🎨 ${balance} обработок\n\n` +
+                    '📷 Чтобы получить лучший результат, отправляй фотографии в исходном качестве, без сжатия — как документ. ✨\n' +
+                    'Ты можешь отправлять сразу несколько фото — каждое обработается по очереди автоматически. Просто загрузи их в чат 👇'),
                 {
                     reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: 'Обработать платно',
-                                    callback_data: 'process_for_pay'
-                                },
-                                {
-                                    text: 'Обработать бесплатно',
-                                    callback_data: 'process_for_free'
-
-                                }
-                            ],
+                    inline_keyboard: [
+                        [
+                            {
+                                text: 'Обработать',
+                                callback_data: 'process_photo'
+                            },
                         ],
+                        [
+                            {
+                              text: '💳 Пополнить баланс',
+                              callback_data: 'refill_balance'
+                            },
+                          ],
+                    ],
                     },
                 },
             );
         } catch (e) {
+            this.logger.error(`${this.constructor.name} onDocument: ${e}`);
             await ctx.reply('Что-то пошло не так, но мы уже разбиираемся');
         }
     }
 
-    @Action('process_for_free')
-    async onAction(@Ctx() ctx: Scenes.SceneContext) {
-        try {
-            await ctx.editMessageReplyMarkup(undefined);
-        } catch (e) {}
+    @Action('refill_balance')
+    async onActionRefill(@Ctx() ctx: Scenes.SceneContext) {
+      try {
+        await ctx.deleteMessage();
+      } catch (e) {}
+  
+      await ctx.scene.leave();
+      await ctx.scene.enter('PAYMENT_SCENE_ID');
+    }
 
-        await ctx.scene.leave();
-        await ctx.scene.enter('PHOTO_SCENE_ID')
+    @Action('process_photo')
+    async onActionPhoto(@Ctx() ctx: Scenes.SceneContext) {
+      try {
+        await ctx.deleteMessage();
+      } catch (e) {}
+  
+      await ctx.scene.leave();
+      await ctx.scene.enter('PHOTO_SCENE_ID');
     }
 }
