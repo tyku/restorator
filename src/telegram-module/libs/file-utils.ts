@@ -15,7 +15,34 @@ export async function ensureDirectoryExists(dirPath: string): Promise<void> {
 }
 
 /**
+ * Сохраняет файл (Buffer/ArrayBuffer) в локальную папку
+ */
+export async function saveFile(
+  fileData: Buffer | ArrayBuffer,
+  localDir: string,
+  fileName: string,
+): Promise<string> {
+  try {
+    // Создаем папку, если её нет
+    await ensureDirectoryExists(localDir);
+
+    const filePath = path.join(localDir, fileName);
+
+    // Сохраняем файл
+    const buffer = fileData instanceof Buffer 
+      ? fileData 
+      : Buffer.from(new Uint8Array(fileData));
+    await fs.writeFile(filePath, buffer);
+
+    return filePath;
+  } catch (error) {
+    throw new Error(`Failed to save file: ${error.message}`);
+  }
+}
+
+/**
  * Скачивает файл по URL и сохраняет его в локальную папку
+ * @deprecated Используйте saveFile для сохранения уже скачанного файла
  */
 export async function downloadAndSaveFile(
   httpService: HttpService,
@@ -56,6 +83,27 @@ export async function fileToBase64(filePath: string): Promise<string> {
     return fileBuffer.toString('base64');
   } catch (error) {
     throw new Error(`Failed to read file and convert to base64: ${error.message}`);
+  }
+}
+
+/**
+ * Удаляет файл по requestId из указанной папки
+ */
+export async function deleteFileByRequestId(
+  requestId: string,
+  localDir: string,
+  fileExtension: string = '.jpg',
+): Promise<void> {
+  try {
+    const fileName = `${requestId}${fileExtension}`;
+    const filePath = path.join(localDir, fileName);
+    
+    await fs.unlink(filePath);
+  } catch (error) {
+    // Игнорируем ошибку, если файл не существует
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new Error(`Failed to delete file: ${error.message}`);
+    }
   }
 }
 

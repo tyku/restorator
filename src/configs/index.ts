@@ -3,7 +3,7 @@ import * as process from 'node:process';
 import telegramConfig from './telegram.config';
 import mongoConfig from './mongo.config';
 import redisConfig from './redis.config';
-import replicateConfig from './replicate.config';
+import providersConfig from './providers.config';
 
 export default () => ({
   port: process.env.PORT,
@@ -12,5 +12,5 @@ export default () => ({
   ...redisConfig(),
   ...mongoConfig(),
   ...telegramConfig(),
-  ...replicateConfig(),
+  ...providersConfig(),
 });

@@ -16,6 +16,12 @@ export class FilesProvider {
     });
   }
 
+  create(data: { chatId: number; requestId: string; href: string }) {
+    const { href, ...rest } = data;
+    
+    return this.model.create({ ...rest, hrefs: [href] });
+  }
+
   update(requestId: string, type: string, data: Record<string, any>) {
     return this.model.updateOne({ requestId, type }, data, {
       upsert: true,

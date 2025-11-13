@@ -46,7 +46,7 @@ function createRedisStore(redis: Redis, ttl = 86400) {
         });
 
         return {
-          botName: 'proj-eng',
+          botName: 'restavrator',
           token: configService.get<string>('telegram.botAccessToken')!,
           middlewares: [
             // session(),

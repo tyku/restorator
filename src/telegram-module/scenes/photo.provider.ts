@@ -1,6 +1,7 @@
 import { Ctx, Message, On, Scene, SceneEnter } from 'nestjs-telegraf';
 import { Scenes } from 'telegraf';
 import { v4 as uuidv4 } from 'uuid';
+import * as path from 'path';
 
 import { FilesProvider } from '../../files-module/files.provider';
 import { LoggerProvider } from '../../logger-module/logger.provider';
@@ -8,6 +9,8 @@ import { escapeText } from '../libs/escape-text';
 import { SubscriptionProvider } from 'src/subscription-module/subscription.provider';
 import { EmptyBalanceException } from 'src/subscription-module/errors/empty-balance.error';
 import { ReplicateService } from 'src/services/providers/replicate.service';
+import { saveFile, deleteFileByRequestId } from '../libs/file-utils';
+import { FileDownloaderProvider } from 'src/services/providers';
 
 type TChat = {
   id: number;
@@ -20,11 +23,14 @@ const getFileName = (path: string = '') => path.split('/').reverse()[0];
 
 @Scene('PHOTO_SCENE_ID')
 export class PhotoProvider {
+  private readonly uploadsDir = path.join(process.cwd(), 'uploads');
+
   constructor(
     private fileProvider: FilesProvider,
     private subscriptionProvider: SubscriptionProvider,
     private logger: LoggerProvider,
     private replicateProvider: ReplicateService,
+    private fileDownloaderProvider: FileDownloaderProvider,
   ) {}
 
   @SceneEnter()
@@ -45,7 +51,7 @@ export class PhotoProvider {
       },
     );
 
-    (ctx.session as any).requestId = generateContextId();
+    // (ctx.session as any).requestId = generateContextId();
   }
 
   @On('document')
@@ -87,16 +93,35 @@ export class PhotoProvider {
 
       const fileId = photo.file_id;
       const fileLink = await ctx.telegram.getFileLink(fileId);
+      const requestId = generateContextId();
 
-      await this.fileProvider.createOrUpdate(
-        {
-          chatId: chat.id,
-          requestId: (ctx.session as any).requestId,
-        },
-        {
-          href: fileLink.href,
-        },
+      // Генерируем уникальное имя файла и сохраняем в локальную папку
+      const fileName = `${requestId}.jpg`;
+
+      const downloadedFile = await this.fileDownloaderProvider.getFile(fileLink.href);
+      const localFilePath = await saveFile(
+        downloadedFile,
+        this.uploadsDir,
+        fileName,
       );
+
+      this.logger.log(`Photo saved to: ${localFilePath}`);
+
+      // await this.fileProvider.createOrUpdate(
+        // {
+          // chatId: chat.id,
+          // requestId: (ctx.session as any).requestId,
+        // },
+        // {
+          // href: fileLink.href,
+        // },
+      // );
+
+      await this.fileProvider.create({
+        chatId: chat.id,
+        requestId: requestId,
+        href: fileLink.href,
+      });
 
       await this.subscriptionProvider.sub(chat.id, 1);
 
@@ -112,6 +137,12 @@ export class PhotoProvider {
           },
         },
       );
+
+      if (processedFile.status === 'succeeded') {
+        // Удаляем файл из папки uploads после успешной обработки
+        await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
+        this.logger.log(`File deleted: ${requestId}.jpg`);
+      }
 
       await ctx.replyWithPhoto(processedFile.output);
     } catch (e) {
