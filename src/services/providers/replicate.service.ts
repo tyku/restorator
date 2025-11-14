@@ -27,6 +27,15 @@ export class ReplicateService extends BaseService {
         });
     } 
 
+    async getPrediction(predictionId: string): Promise<TReplicateResponse> {
+        return this.request(`/v1/predictions/${predictionId}`, {
+            method: 'GET',
+            headers: {
+                ...this.getAuthHeaders(),
+            },
+        });
+    }
+
     private getAuthHeaders() {
         const replicationToken = this.configService.getOrThrow<{token: string}>(`providers.${this.providerName}`);
 

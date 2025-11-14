@@ -8,9 +8,9 @@ import { LoggerProvider } from '../../logger-module/logger.provider';
 import { escapeText } from '../libs/escape-text';
 import { SubscriptionProvider } from 'src/subscription-module/subscription.provider';
 import { EmptyBalanceException } from 'src/subscription-module/errors/empty-balance.error';
-import { ReplicateService } from 'src/services/providers/replicate.service';
-import { saveFile, deleteFileByRequestId } from '../libs/file-utils';
-import { FileDownloaderProvider } from 'src/services/providers';
+import { saveFile, deleteFileByRequestId, localFileToDataUrl } from '../libs/file-utils';
+import { FileDownloaderProvider, ReplicateService } from 'src/services/providers';
+import { ReplicateQueueService } from 'src/queue-module/replicate-queue.service';
 
 type TChat = {
   id: number;
@@ -31,6 +31,7 @@ export class PhotoProvider {
     private logger: LoggerProvider,
     private replicateProvider: ReplicateService,
     private fileDownloaderProvider: FileDownloaderProvider,
+    private replicateQueueService: ReplicateQueueService,
   ) {}
 
   @SceneEnter()
@@ -81,6 +82,8 @@ export class PhotoProvider {
   }
 
   private async processFile(ctx: Scenes.SceneContext, chat: TChat, photo: Record<string, any>) {
+    const requestId = generateContextId();
+
     try {
       const balance = await this.subscriptionProvider.getBalance(chat.id);
 
@@ -93,7 +96,6 @@ export class PhotoProvider {
 
       const fileId = photo.file_id;
       const fileLink = await ctx.telegram.getFileLink(fileId);
-      const requestId = generateContextId();
 
       // Генерируем уникальное имя файла и сохраняем в локальную папку
       const fileName = `${requestId}.jpg`;
@@ -107,25 +109,21 @@ export class PhotoProvider {
 
       this.logger.log(`Photo saved to: ${localFilePath}`);
 
-      // await this.fileProvider.createOrUpdate(
-        // {
-          // chatId: chat.id,
-          // requestId: (ctx.session as any).requestId,
-        // },
-        // {
-          // href: fileLink.href,
-        // },
-      // );
-
       await this.fileProvider.create({
         chatId: chat.id,
-        requestId: requestId,
+        requestId,
         href: fileLink.href,
       });
 
-      await this.subscriptionProvider.sub(chat.id, 1);
+      // Преобразуем локальный файл в base64 data URL
+      const dataUrl = await localFileToDataUrl(localFilePath);
 
-      const processedFile = await this.replicateProvider.colorizePhoto(fileLink.href);
+      const processedFile = await this.replicateProvider.colorizePhoto(dataUrl);
+
+      if(processedFile.status === 'failed') {
+        await ctx.reply('Что-то пошло не так, но мы уже изучаем вопрос');
+        return;
+      }
 
       await ctx.replyWithMarkdownV2(
         escapeText('📸 Отлично! Фото принято в работу.'),
@@ -139,14 +137,29 @@ export class PhotoProvider {
       );
 
       if (processedFile.status === 'succeeded') {
+        await this.subscriptionProvider.sub(chat.id, 1);
+
+        await ctx.replyWithPhoto(processedFile.output);
+
         // Удаляем файл из папки uploads после успешной обработки
         await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
         this.logger.log(`File deleted: ${requestId}.jpg`);
       }
 
-      await ctx.replyWithPhoto(processedFile.output);
+      if (processedFile.status === 'processing') {
+        await ctx.reply('Фотография обрабатывается... Скоро она будет готова');
+        await this.replicateQueueService.addJob({
+          predictionId: processedFile.id,
+          chatId: chat.id,
+          requestId: requestId,
+        });
+
+        return;
+      }
     } catch (e) {
       this.logger.error(`${this.constructor.name} onDocument: ${e}`);
+
+      await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
 
       // if (!(e instanceof EmptyBalanceException)) {
       await ctx.reply('Что-то пошло не так, но мы уже изучаем вопрос');

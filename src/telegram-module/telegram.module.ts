@@ -7,13 +7,15 @@ import { MenuProvider } from './scenes/menu.provider';
 import { SubscriptionModule } from '../subscription-module/subscription.module';
 import { PaymentProvider } from './scenes/payment.provider';
 import { FilesModule } from '../files-module/files.module';
-import {PhotoProvider} from "./scenes/photo.provider";
+import { PhotoProvider } from './scenes/photo.provider';
+// import { ReplicateQueueModule } from '../queue-module/replicate-queue.module';
 
 @Module({
   imports: [
     UserModule,
     FilesModule,
     SubscriptionModule,
+    // ReplicateQueueModule,
   ],
   providers: [
     MenuProvider,

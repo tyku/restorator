@@ -3,12 +3,14 @@ import { TelegrafModule } from 'nestjs-telegraf';
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
+import Redis from 'ioredis';
 
 import configs from './configs';
 import { TelegramModule } from './telegram-module/telegram.module';
 import { LoggerModule } from './logger-module/logger.module';
 import { ServicesModule } from './services/services.module';
-import Redis from 'ioredis';
+import { ReplicateQueueModule } from './queue-module/replicate-queue.module';
 
 function createRedisStore(redis: Redis, ttl = 86400) {
   return {
@@ -31,6 +33,16 @@ function createRedisStore(redis: Redis, ttl = 86400) {
       load: [configs],
       envFilePath: ['.env'],
       isGlobal: true,
+    }),
+    BullModule.forRootAsync({
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.get<string>('redis.host'),
+          port: configService.get<number>('redis.port'),
+          password: configService.get<string>('redis.password'),
+        },
+      }),
+      inject: [ConfigService],
     }),
     TelegrafModule.forRootAsync({
       imports: [TelegramModule],
@@ -95,6 +107,7 @@ function createRedisStore(redis: Redis, ttl = 86400) {
     }),
     ServicesModule,
     LoggerModule,
+    ReplicateQueueModule,
   ],
   controllers: [],
   providers: [],

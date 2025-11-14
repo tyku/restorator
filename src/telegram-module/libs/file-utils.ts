@@ -125,6 +125,20 @@ export function getMimeTypeFromExtension(filePath: string): string {
 }
 
 /**
+ * Преобразует локальный файл в base64 data URL
+ */
+export async function localFileToDataUrl(filePath: string): Promise<string> {
+  // Преобразуем в base64
+  const base64 = await fileToBase64(filePath);
+
+  // Определяем MIME type
+  const mimeType = getMimeTypeFromExtension(filePath);
+
+  // Создаем data URL
+  return `data:${mimeType};base64,${base64}`;
+}
+
+/**
  * Скачивает файл, сохраняет его локально и возвращает base64 с data URL
  */
 export async function downloadFileAsBase64(
