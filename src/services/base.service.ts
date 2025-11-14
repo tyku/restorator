@@ -46,15 +46,13 @@ export class BaseService implements OnModuleInit {
       this.logger.log('OUTGOING_REQUEST', {
         url,
         baseUrl: config.baseURL,
-        body: config.data,
       });
       const response = await firstValueFrom(response$);
 
       this.logger.log('OUTGOING_REQUEST_RESPONSE', {
         url,
         baseUrl: config.baseURL,
-        body: config.data,
-        response: response.data,
+        // response: response.data,
       });
 
       return response.data;

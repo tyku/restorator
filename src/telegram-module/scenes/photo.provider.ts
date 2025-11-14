@@ -141,6 +141,11 @@ export class PhotoProvider {
 
         await ctx.replyWithPhoto(processedFile.output);
 
+        await ctx.reply('✅ Готово! Вот обновлённое фото 👇\n\n' +
+          '📸 Нравится результат?\n'+
+          'Поделись фото с друзьями — пусть тоже попробуют раскрасить свои старые снимки!'
+        );
+
         // Удаляем файл из папки uploads после успешной обработки
         await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
         this.logger.log(`File deleted: ${requestId}.jpg`);

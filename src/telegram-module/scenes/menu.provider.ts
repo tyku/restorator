@@ -27,7 +27,7 @@ export class MenuProvider {
           ctx.update?.message?.chat?.id ||
           ctx.update?.callback_query?.message?.chat?.id;
 
-      const replyText = '👋 Привет! Я — бот, который превращает старые чёрно-белые фото в цветные и восстанавливает их качество.\n' +
+      const replyText = 
           'Просто отправь мне фото или документ — я всё сделаю автоматически.\n\n' +
           '*❗️Чтобы получить лучший результат, отправляй фотографии в исходном качестве, без сжатия (как документ)*\n\n' +
           'Примеры результатов 👇';
@@ -47,19 +47,19 @@ export class MenuProvider {
         },
       ];
 
-      const mediaGroup2: InputMediaPhoto[] = [
-        {
-          type: 'photo',
-          media: Input.fromLocalFile(path.join(__dirname, '..', '..', '..', 'photos', '2.jpg')),
-        },
-        {
-          type: 'photo',
-          media: Input.fromLocalFile(path.join(__dirname, '..', '..', '..', 'photos', '2_c.png')),
-        },
-      ];
+      // const mediaGroup2: InputMediaPhoto[] = [
+      //   {
+      //     type: 'photo',
+      //     media: Input.fromLocalFile(path.join(__dirname, '..', '..', '..', 'photos', '2.jpg')),
+      //   },
+      //   {
+      //     type: 'photo',
+      //     media: Input.fromLocalFile(path.join(__dirname, '..', '..', '..', 'photos', '2_c.png')),
+      //   },
+      // ];
 
-      await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
-      await ctx.telegram.sendMediaGroup(chatId, mediaGroup2);
+      // await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
+      // await ctx.telegram.sendMediaGroup(chatId, mediaGroup2);
 
       const balance = await this.subscriptionProvider.getBalance(chatId);
 
