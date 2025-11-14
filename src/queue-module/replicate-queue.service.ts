@@ -6,12 +6,12 @@ import { REPLICATE_COLORIZE_JOB, REPLICATE_QUEUE } from './constants';
 import type { ReplicateColorizeJobData } from './interfaces/replicate-job.interface';
 
 const DEFAULT_JOB_OPTIONS: JobsOptions = {
-  attempts: 3,
+  attempts: 30, // Увеличиваем количество попыток для обработки фото
   removeOnComplete: true,
   removeOnFail: false,
   backoff: {
     type: 'exponential',
-    delay: 1_000,
+    delay: 5_000, // Начинаем с 5 секунд, экспоненциально увеличиваем
   },
 };
 

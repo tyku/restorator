@@ -46,18 +46,35 @@ export class ReplicateQueueProcessor extends WorkerHost {
       }
 
       if (processedFile.status === 'failed') {
-        await this.bot.telegram.sendMessage(
-          chatId,
-          '❌ Произошла ошибка при обработке фото. Попробуйте еще раз.',
-        );
+        try {
+          await this.bot.telegram.sendMessage(
+            chatId,
+            '❌ Произошла ошибка при обработке фото. Попробуйте еще раз.',
+          );
+        } catch (sendError) {
+          this.logger.error(`Failed to send error message to chat ${chatId}: ${sendError.message}`);
+        }
 
-        return;
+        throw new Error(processedFile.error || 'Processing failed');
       }
 
-      // Если статус еще processing, возвращаем результат для повторной проверки
-      return processedFile;
+
+      throw new Error(`Prediction is still processing. Attempt ${job.attemptsMade + 1}/${job.opts.attempts}`);
     } catch (error) {
-      this.logger.error(`Failed to send error message to chat ${chatId}: ${error.message}`);
+      this.logger.error(`Error processing replicate job: ${error.message}`);
+      
+      if (!error.message.includes('still processing')) {
+        try {
+          await this.bot.telegram.sendMessage(
+            chatId,
+            '❌ Произошла ошибка при обработке фото. Попробуйте еще раз.',
+          );
+        } catch (sendError) {
+          this.logger.error(`Failed to send error message to chat ${chatId}: ${sendError.message}`);
+        }
+      }
+
+      throw error;
     }
   }
 
