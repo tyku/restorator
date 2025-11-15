@@ -99,10 +99,20 @@ export class PhotoProvider {
       const balance = await this.subscriptionProvider.getBalance(chat.id);
 
       if (balance <= 0) {
-        await ctx.scene.leave();
-        await ctx.scene.enter('PAYMENT_SCENE_ID');
+        const paymentSceneShown = (ctx.session as any)?.paymentSceneShown || false;
+
+        if (!paymentSceneShown) {
+          (ctx.session as any).paymentSceneShown = true;
+          await ctx.scene.leave();
+          await ctx.scene.enter('PAYMENT_SCENE_ID');
+        }
         
         return;
+      }
+
+      // Сбрасываем флаг, если баланс есть (пользователь пополнил)
+      if ((ctx.session as any)?.paymentSceneShown) {
+        (ctx.session as any).paymentSceneShown = false;
       }
 
       const fileId = photo.file_id;
