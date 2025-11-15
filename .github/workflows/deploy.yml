@@ -19,7 +19,7 @@ jobs:
 
       - name: Build and push image
         run: |
-          IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/restorator:latest
+          IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/restavrator:latest
           docker build -t $IMAGE_NAME .
           docker push $IMAGE_NAME
 

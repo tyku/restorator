@@ -56,6 +56,7 @@ function createRedisStore(redis: Redis, ttl = 86400) {
           host: redisHost || 'localhost',
           port: redisPort,
           password: redisPassword,
+          db: 10,
         });
 
         return {
@@ -65,24 +66,6 @@ function createRedisStore(redis: Redis, ttl = 86400) {
             // session(),
             session({ store: createRedisStore(redis) }),
             async (ctx, next) => {
-
-              // if (ctx.update.message?.text === '📚️ Меню') {
-              //   if (ctx.scene && typeof ctx.scene.leave === 'function') {
-              //     await ctx.scene.leave();
-              //   }
-              //   if (ctx.session && ctx.session.__scenes) {
-              //     delete ctx.session.__scenes;
-              //   }
-              //
-              //   console.log('===================923821', ctx.scene.enter);
-              //
-              //
-              //   if (ctx.scene && typeof ctx.scene.enter === 'function') {
-              //
-              //     ctx.scene.enter('MENU_SCENE_ID');
-              //   }
-              // }
-
               if (ctx.update.message?.text === '/start') {
                 if (ctx.scene && typeof ctx.scene.leave === 'function') {
                   await ctx.scene.leave();
