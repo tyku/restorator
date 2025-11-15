@@ -11,6 +11,8 @@ import { EmptyBalanceException } from 'src/subscription-module/errors/empty-bala
 import { saveFile, deleteFileByRequestId, localFileToDataUrl } from '../libs/file-utils';
 import { FileDownloaderProvider, ReplicateService } from 'src/services/providers';
 import { ReplicateQueueService } from 'src/queue-module/replicate-queue.service';
+import { AnalyticsProvider } from 'src/analytics-module/analytics.provider';
+import { EAnalyticsEventName } from 'src/analytics-module/constants/types';
 
 type TChat = {
   id: number;
@@ -32,14 +34,16 @@ export class PhotoProvider {
     private replicateProvider: ReplicateService,
     private fileDownloaderProvider: FileDownloaderProvider,
     private replicateQueueService: ReplicateQueueService,
+    private analyticsProvider: AnalyticsProvider,
   ) {}
 
   @SceneEnter()
   async onSceneEnter(@Ctx() ctx: Scenes.SceneContext) {
-    // try {
-    //   await ctx.deleteMessage();
-    // } catch (e) {}
-    //
+    const chatId = ctx.from?.id || ctx.chat?.id;
+    
+    if (chatId) {
+      await this.analyticsProvider.trackSceneEnter(chatId, 'PHOTO_SCENE_ID');
+    }
 
     await ctx.replyWithMarkdownV2(
       'Прикрепите одно или несколько фото и нажмите "Обработать ✅", когда будете готовы ',
@@ -51,8 +55,6 @@ export class PhotoProvider {
         },
       },
     );
-
-    // (ctx.session as any).requestId = generateContextId();
   }
 
   @On('document')
@@ -115,6 +117,15 @@ export class PhotoProvider {
         href: fileLink.href,
       });
 
+      await this.analyticsProvider.trackAction(
+        chat.id,
+        EAnalyticsEventName.PHOTO_UPLOADED,
+        {
+          requestId,
+          fileId,
+        },
+      );
+
       // Преобразуем локальный файл в base64 data URL
       const dataUrl = await localFileToDataUrl(localFilePath);
 
@@ -126,7 +137,8 @@ export class PhotoProvider {
       }
 
       await ctx.replyWithMarkdownV2(
-        escapeText('📸 Отлично! Фото принято в работу.'),
+        escapeText('📸 Отлично! Фото принято в работу.\n\n' +
+                    '⏳ Обработка займёт около минуты — нейросеть уже раскрашивает твоё фото.'),
         {
           reply_markup: {
             keyboard: [[{ text: '📱️Меню' }]],
@@ -138,6 +150,15 @@ export class PhotoProvider {
 
       if (processedFile.status === 'succeeded') {
         await this.subscriptionProvider.sub(chat.id, 1);
+
+        await this.analyticsProvider.trackAction(
+          chat.id,
+          EAnalyticsEventName.PHOTO_PROCESSED,
+          {
+            requestId,
+            status: 'succeeded',
+          },
+        );
 
         await ctx.replyWithPhoto(processedFile.output);
 
@@ -164,11 +185,19 @@ export class PhotoProvider {
     } catch (e) {
       this.logger.error(`${this.constructor.name} onDocument: ${e}`);
 
+      await this.analyticsProvider.trackError(
+        chat.id,
+        EAnalyticsEventName.PROCESSING_ERROR,
+        e instanceof Error ? e : new Error(String(e)),
+        {
+          requestId,
+          action: 'process_file',
+        },
+      );
+
       await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
 
-      // if (!(e instanceof EmptyBalanceException)) {
       await ctx.reply('Что-то пошло не так, но мы уже изучаем вопрос');
-      // }
 
       return;
     }

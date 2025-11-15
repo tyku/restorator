@@ -9,6 +9,8 @@ import { ReplicateService } from '../services/providers/replicate.service';
 import { LoggerProvider } from '../logger-module/logger.provider';
 import { SubscriptionProvider } from '../subscription-module/subscription.provider';
 import { deleteFileByRequestId } from '../telegram-module/libs/file-utils';
+import { AnalyticsProvider } from '../analytics-module/analytics.provider';
+import { EAnalyticsEventName } from '../analytics-module/constants/types';
 import * as path from 'path';
 
 @Processor(REPLICATE_QUEUE)
@@ -20,6 +22,7 @@ export class ReplicateQueueProcessor extends WorkerHost {
     private readonly replicateService: ReplicateService,
     private readonly logger: LoggerProvider,
     private readonly subscriptionProvider: SubscriptionProvider,
+    private readonly analyticsProvider: AnalyticsProvider,
   ) {
     super();
   }
@@ -32,6 +35,16 @@ export class ReplicateQueueProcessor extends WorkerHost {
 
       if (processedFile.status === 'succeeded') {
         await this.subscriptionProvider.sub(chatId, 1);
+
+        await this.analyticsProvider.trackAction(
+          chatId,
+          EAnalyticsEventName.PHOTO_PROCESSED,
+          {
+            requestId,
+            status: 'succeeded',
+            predictionId,
+          },
+        );
 
         await this.bot.telegram.sendPhoto(chatId, processedFile.output, {
           caption: '✅ Фото успешно обработано!',
@@ -46,6 +59,17 @@ export class ReplicateQueueProcessor extends WorkerHost {
       }
 
       if (processedFile.status === 'failed') {
+        await this.analyticsProvider.trackError(
+          chatId,
+          EAnalyticsEventName.REPLICATE_ERROR,
+          new Error(processedFile.error || 'Processing failed'),
+          {
+            requestId,
+            predictionId,
+            status: 'failed',
+          },
+        );
+
         try {
           await this.bot.telegram.sendMessage(
             chatId,
@@ -64,6 +88,17 @@ export class ReplicateQueueProcessor extends WorkerHost {
       this.logger.error(`Error processing replicate job: ${error.message}`);
       
       if (!error.message.includes('still processing')) {
+        await this.analyticsProvider.trackError(
+          chatId,
+          EAnalyticsEventName.QUEUE_ERROR,
+          error instanceof Error ? error : new Error(String(error)),
+          {
+            requestId,
+            predictionId,
+            attempt: job.attemptsMade + 1,
+          },
+        );
+
         try {
           await this.bot.telegram.sendMessage(
             chatId,
@@ -79,8 +114,22 @@ export class ReplicateQueueProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job | undefined, error: Error): void {
+  async onFailed(job: Job<ReplicateColorizeJobData> | undefined, error: Error): Promise<void> {
     this.logger.error(`Replicate job failed: jobId=${job?.id}, error=${error.message}`);
+    
+    if (job?.data?.chatId) {
+      await this.analyticsProvider.trackError(
+        job.data.chatId,
+        EAnalyticsEventName.QUEUE_ERROR,
+        error,
+        {
+          requestId: job.data.requestId,
+          predictionId: job.data.predictionId,
+          jobId: job.id,
+          attempts: job.attemptsMade,
+        },
+      );
+    }
   }
 }
 

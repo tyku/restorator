@@ -6,12 +6,17 @@ import { SubscriptionProvider } from '../subscription-module/subscription.provid
 import { ESubscriptionType } from '../subscription-module/constants/types';
 import { getScene } from './libs/scenes';
 import { getTariffById } from './constants/tariffs';
+import { AnalyticsProvider } from '../analytics-module/analytics.provider';
+import {
+  EAnalyticsEventName,
+} from '../analytics-module/constants/types';
 
 @Update()
 export class TelegramUpdate {
   constructor(
     private logger: LoggerProvider,
     private subscriptionProvider: SubscriptionProvider,
+    private analyticsProvider: AnalyticsProvider,
   ) {}
 
   @Start()
@@ -19,6 +24,16 @@ export class TelegramUpdate {
     @Ctx()
     ctx: Scenes.SceneContext & { startPayload: Record<string, any> },
   ): Promise<void> {
+    const chatId = ctx.from?.id || ctx.chat?.id;
+    
+    if (chatId) {
+      await this.analyticsProvider.trackBotStart(chatId, {
+        username: ctx.from?.username,
+        firstName: ctx.from?.first_name,
+        startPayload: ctx.startPayload,
+      });
+    }
+
     await ctx.scene.leave();
 
     if (ctx.session) {
@@ -138,6 +153,15 @@ export class TelegramUpdate {
 
   @Hears('📱️Меню')
   async menu(@Ctx() ctx: Scenes.SceneContext) {
+    const chatId = ctx.from?.id || ctx.chat?.id;
+    
+    if (chatId) {
+      await this.analyticsProvider.trackButtonClick(
+        chatId,
+        EAnalyticsEventName.MENU_BUTTON,
+      );
+    }
+
     await ctx.reply('👌', {
       reply_markup: {
         remove_keyboard: true,
@@ -155,10 +179,35 @@ export class TelegramUpdate {
         return;
       }
 
+      const chatId = ctx.from?.id || ctx.chat?.id;
+      
+      if (chatId) {
+        await this.analyticsProvider.trackAction(
+          chatId,
+          EAnalyticsEventName.PAYMENT_INITIATED,
+          {
+            invoicePayload: ctx.preCheckoutQuery.invoice_payload,
+            currency: ctx.preCheckoutQuery.currency,
+            totalAmount: ctx.preCheckoutQuery.total_amount,
+          },
+        );
+      }
+
       // Всегда подтверждаем запрос
       await ctx.answerPreCheckoutQuery(true);
     } catch (e) {
       this.logger.error(`${this.constructor.name} onPreCheckoutQuery: ${e}`);
+      
+      const chatId = ctx.from?.id || ctx.chat?.id;
+      if (chatId) {
+        await this.analyticsProvider.trackError(
+          chatId,
+          EAnalyticsEventName.PAYMENT_ERROR,
+          e instanceof Error ? e : new Error(String(e)),
+          { action: 'pre_checkout_query' },
+        );
+      }
+      
       try {
         await ctx.answerPreCheckoutQuery(false, 'Произошла ошибка при обработке платежа');
       } catch (err) {
@@ -214,14 +263,36 @@ export class TelegramUpdate {
 
       const newBalance = await this.subscriptionProvider.getBalance(userId);
 
+      await this.analyticsProvider.trackAction(
+        userId,
+        EAnalyticsEventName.PAYMENT_SUCCESS,
+        {
+          tariffId,
+          amount: tariff.amount,
+          price: tariff.price,
+          newBalance,
+        },
+      );
+
       await ctx.reply(
         `✅ Платеж успешно обработан!\n\n` +
           `💰 Зачислено: 🎨 ${tariff.amount} обработок\n` +
           `💰 Текущий баланс: 🎨 ${newBalance} обработок\n\n` +
-          `Спасибо за покупку! Теперь вы можете обрабатывать фотографии.`,
+          `Спасибо! Пусть ваши фото станут ещё ярче и живее 🌈`,
       );
     } catch (e) {
       this.logger.error(`${this.constructor.name} onSuccessfulPayment: ${e}`);
+      
+      const chatId = ctx.from?.id || ctx.chat?.id;
+      if (chatId) {
+        await this.analyticsProvider.trackError(
+          chatId,
+          EAnalyticsEventName.PAYMENT_ERROR,
+          e instanceof Error ? e : new Error(String(e)),
+          { action: 'successful_payment' },
+        );
+      }
+      
       await ctx.reply('Произошла ошибка при обработке платежа. Обратитесь в поддержку.');
     }
   }

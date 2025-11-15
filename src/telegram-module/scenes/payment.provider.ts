@@ -10,12 +10,15 @@ import {
   getProcessingWordNominative,
   getPhotoWordGenitive,
 } from '../libs/declension';
+import { AnalyticsProvider } from 'src/analytics-module/analytics.provider';
+import { EAnalyticsEventName } from 'src/analytics-module/constants/types';
 
 @Scene('PAYMENT_SCENE_ID')
 export class PaymentProvider {
   constructor(
     private subscriptionProvider: SubscriptionProvider,
     private logger: LoggerProvider,
+    private analyticsProvider: AnalyticsProvider,
   ) {}
 
   @SceneEnter()
@@ -43,6 +46,8 @@ export class PaymentProvider {
       await ctx.reply('Произошла ошибка. Попробуйте еще раз.');
       return;
     }
+
+    await this.analyticsProvider.trackSceneEnter(chatId, 'PAYMENT_SCENE_ID');
 
     const balance = await this.subscriptionProvider.getBalance(chatId);
 
@@ -115,6 +120,16 @@ export class PaymentProvider {
         chatId: chatId,
       });
 
+      await this.analyticsProvider.trackButtonClick(
+        chatId,
+        EAnalyticsEventName.TARIFF_SELECT,
+        {
+          tariffId: tariff.id,
+          tariffAmount: tariff.amount,
+          tariffPrice: tariff.price,
+        },
+      );
+
       const processingWord = getProcessingWordAccusative(tariff.amount);
       const processingWordLabel = getProcessingWordNominative(tariff.amount);
       const photoWord = getPhotoWordGenitive(tariff.amount);
@@ -135,12 +150,33 @@ export class PaymentProvider {
       });
     } catch (e) {
       this.logger.error(`${this.constructor.name} onTariffSelect: ${e}`);
+      
+      const chatId = ctx.from?.id || ctx.chat?.id;
+      if (chatId) {
+        await this.analyticsProvider.trackError(
+          chatId,
+          EAnalyticsEventName.PAYMENT_ERROR,
+          e instanceof Error ? e : new Error(String(e)),
+          { action: 'tariff_select' },
+        );
+      }
+      
       await ctx.answerCbQuery('Произошла ошибка. Попробуйте еще раз.');
     }
   }
 
   @Action('back_to_menu')
   async onBackToMenu(@Ctx() ctx: Scenes.SceneContext) {
+    const chatId = ctx.from?.id || ctx.chat?.id;
+    
+    if (chatId) {
+      await this.analyticsProvider.trackButtonClick(
+        chatId,
+        EAnalyticsEventName.BACK_TO_MENU,
+      );
+      await this.analyticsProvider.trackSceneLeave(chatId, 'PAYMENT_SCENE_ID');
+    }
+
     try {
       await ctx.deleteMessage();
     } catch (e) {}

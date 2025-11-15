@@ -11,6 +11,7 @@ import { TelegramModule } from './telegram-module/telegram.module';
 import { LoggerModule } from './logger-module/logger.module';
 import { ServicesModule } from './services/services.module';
 import { ReplicateQueueModule } from './queue-module/replicate-queue.module';
+import { AnalyticsModule } from './analytics-module/analytics.module';
 
 function createRedisStore(redis: Redis, ttl = 86400) {
   return {
@@ -105,10 +106,11 @@ function createRedisStore(redis: Redis, ttl = 86400) {
       }),
       inject: [ConfigService],
     }),
-    ServicesModule,
-    LoggerModule,
-    ReplicateQueueModule,
-  ],
+        ServicesModule,
+        LoggerModule,
+        ReplicateQueueModule,
+        AnalyticsModule,
+      ],
   controllers: [],
   providers: [],
 })

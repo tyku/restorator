@@ -8,6 +8,7 @@ import { SubscriptionModule } from '../subscription-module/subscription.module';
 import { PaymentProvider } from './scenes/payment.provider';
 import { FilesModule } from '../files-module/files.module';
 import { PhotoProvider } from './scenes/photo.provider';
+import { AnalyticsModule } from '../analytics-module/analytics.module';
 // import { ReplicateQueueModule } from '../queue-module/replicate-queue.module';
 
 @Module({
@@ -15,6 +16,7 @@ import { PhotoProvider } from './scenes/photo.provider';
     UserModule,
     FilesModule,
     SubscriptionModule,
+    AnalyticsModule,
     // ReplicateQueueModule,
   ],
   providers: [

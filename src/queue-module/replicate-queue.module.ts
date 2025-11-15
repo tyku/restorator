@@ -7,6 +7,7 @@ import { ReplicateQueueService } from './replicate-queue.service';
 import { ServicesModule } from '../services/services.module';
 import { LoggerModule } from '../logger-module/logger.module';
 import { SubscriptionModule } from '../subscription-module/subscription.module';
+import { AnalyticsModule } from '../analytics-module/analytics.module';
 
 @Global()
 @Module({
@@ -17,6 +18,7 @@ import { SubscriptionModule } from '../subscription-module/subscription.module';
     ServicesModule,
     LoggerModule,
     SubscriptionModule,
+    AnalyticsModule,
   ],
   providers: [ReplicateQueueProcessor, ReplicateQueueService],
   exports: [ReplicateQueueService],

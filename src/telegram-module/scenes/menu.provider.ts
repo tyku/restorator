@@ -8,6 +8,8 @@ import type { InputMediaPhoto } from 'telegraf/types';
 import { escapeText } from '../libs/escape-text';
 import { LoggerProvider } from 'src/logger-module/logger.provider';
 import { SubscriptionProvider } from 'src/subscription-module/subscription.provider';
+import { AnalyticsProvider } from 'src/analytics-module/analytics.provider';
+import { EAnalyticsEventName } from 'src/analytics-module/constants/types';
 
 type TSession = { session: { source: string; __scenes: Record<string, any> } };
 type TUpdate = { update: any };
@@ -18,6 +20,7 @@ export class MenuProvider {
   constructor(
     private logger: LoggerProvider,
     private subscriptionProvider: SubscriptionProvider,
+    private analyticsProvider: AnalyticsProvider,
   ) {}
 
   @SceneEnter()
@@ -26,6 +29,10 @@ export class MenuProvider {
       const chatId =
           ctx.update?.message?.chat?.id ||
           ctx.update?.callback_query?.message?.chat?.id;
+
+      if (chatId) {
+        await this.analyticsProvider.trackSceneEnter(chatId, 'MENU_SCENE_ID');
+      }
 
       const replyText = 
           'Просто отправь мне фото или документ — я всё сделаю автоматически.\n\n' +
@@ -94,6 +101,16 @@ export class MenuProvider {
 
   @Action('refill_balance')
   async onAction(@Ctx() ctx: Scenes.SceneContext) {
+    const chatId = ctx.from?.id || ctx.chat?.id;
+    
+    if (chatId) {
+      await this.analyticsProvider.trackButtonClick(
+        chatId,
+        EAnalyticsEventName.PAYMENT_BUTTON,
+      );
+      await this.analyticsProvider.trackSceneLeave(chatId, 'MENU_SCENE_ID');
+    }
+
     try {
       await ctx.deleteMessage();
     } catch (e) {}
@@ -104,6 +121,16 @@ export class MenuProvider {
 
   @Action('process_photo')
   async onActionPhoto(@Ctx() ctx: Scenes.SceneContext) {
+    const chatId = ctx.from?.id || ctx.chat?.id;
+    
+    if (chatId) {
+      await this.analyticsProvider.trackButtonClick(
+        chatId,
+        EAnalyticsEventName.PHOTO_SCENE_BUTTON,
+      );
+      await this.analyticsProvider.trackSceneLeave(chatId, 'MENU_SCENE_ID');
+    }
+
     try {
       await ctx.deleteMessage();
     } catch (e) {}
