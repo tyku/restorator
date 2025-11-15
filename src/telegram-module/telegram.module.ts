@@ -9,6 +9,7 @@ import { PaymentProvider } from './scenes/payment.provider';
 import { FilesModule } from '../files-module/files.module';
 import { PhotoProvider } from './scenes/photo.provider';
 import { AnalyticsModule } from '../analytics-module/analytics.module';
+import { PaymentModule } from '../payments-module/payment.module';
 // import { ReplicateQueueModule } from '../queue-module/replicate-queue.module';
 
 @Module({
@@ -17,6 +18,7 @@ import { AnalyticsModule } from '../analytics-module/analytics.module';
     FilesModule,
     SubscriptionModule,
     AnalyticsModule,
+    PaymentModule,
     // ReplicateQueueModule,
   ],
   providers: [

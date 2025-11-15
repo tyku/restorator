@@ -12,6 +12,7 @@ import { LoggerModule } from './logger-module/logger.module';
 import { ServicesModule } from './services/services.module';
 import { ReplicateQueueModule } from './queue-module/replicate-queue.module';
 import { AnalyticsModule } from './analytics-module/analytics.module';
+import { PaymentModule } from './payments-module/payment.module';
 
 function createRedisStore(redis: Redis, ttl = 86400) {
   return {
@@ -93,6 +94,7 @@ function createRedisStore(redis: Redis, ttl = 86400) {
         LoggerModule,
         ReplicateQueueModule,
         AnalyticsModule,
+        PaymentModule,
       ],
   controllers: [],
   providers: [],

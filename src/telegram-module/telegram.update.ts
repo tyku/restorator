@@ -10,6 +10,8 @@ import { AnalyticsProvider } from '../analytics-module/analytics.provider';
 import {
   EAnalyticsEventName,
 } from '../analytics-module/constants/types';
+import { PaymentProvider } from '../payments-module/payment.provider';
+import { EPaymentProvider, EPaymentStatus } from '../payments-module/constants/types';
 
 @Update()
 export class TelegramUpdate {
@@ -17,6 +19,7 @@ export class TelegramUpdate {
     private logger: LoggerProvider,
     private subscriptionProvider: SubscriptionProvider,
     private analyticsProvider: AnalyticsProvider,
+    private paymentProvider: PaymentProvider,
   ) {}
 
   @Start()
@@ -49,30 +52,30 @@ export class TelegramUpdate {
     await ctx.scene.enter('NEWUSER_SCENE_ID');
   }
 
-  @Action('promo_code')
-  async onPromocode(@Ctx() ctx: Scenes.SceneContext) {
-    try {
-      await ctx.scene.leave();
-    } catch (e) {}
+  // @Action('promo_code')
+  // async onPromocode(@Ctx() ctx: Scenes.SceneContext) {
+  //   try {
+  //     await ctx.scene.leave();
+  //   } catch (e) {}
 
-    await ctx.scene.enter('PROMOCODE_SCENE_ID');
-  }
+  //   await ctx.scene.enter('PROMOCODE_SCENE_ID');
+  // }
 
-  @Action(/^trainer:.+$/)
-  async onTrainer(
-    @Ctx() ctx: Scenes.SceneContext & { update: { callback_query: any } },
-  ) {
-    try {
-      await ctx.deleteMessage();
-    } catch (e) {
-      this.logger.error(`${this.constructor.name} onTrainer error:`, e);
-    }
+  // @Action(/^trainer:.+$/)
+  // async onTrainer(
+  //   @Ctx() ctx: Scenes.SceneContext & { update: { callback_query: any } },
+  // ) {
+  //   try {
+  //     await ctx.deleteMessage();
+  //   } catch (e) {
+  //     this.logger.error(`${this.constructor.name} onTrainer error:`, e);
+  //   }
 
-    const action = ctx.update.callback_query?.data;
-    const value = action.split(':')[1];
+  //   const action = ctx.update.callback_query?.data;
+  //   const value = action.split(':')[1];
 
-    await ctx.scene.enter('TRAINER_SCENE_ID', { contextName: value });
-  }
+  //   await ctx.scene.enter('TRAINER_SCENE_ID', { contextName: value });
+  // }
 
   //
   // @Action('withdraw')
@@ -181,17 +184,56 @@ export class TelegramUpdate {
 
       const chatId = ctx.from?.id || ctx.chat?.id;
       
-      if (chatId) {
-        await this.analyticsProvider.trackAction(
-          chatId,
-          EAnalyticsEventName.PAYMENT_INITIATED,
-          {
-            invoicePayload: ctx.preCheckoutQuery.invoice_payload,
-            currency: ctx.preCheckoutQuery.currency,
-            totalAmount: ctx.preCheckoutQuery.total_amount,
-          },
-        );
+      if (!chatId) {
+        await ctx.answerPreCheckoutQuery(false, 'Ошибка получения данных пользователя');
+        return;
       }
+
+      let payloadData;
+      try {
+        payloadData = JSON.parse(ctx.preCheckoutQuery.invoice_payload);
+      } catch (e) {
+        this.logger.error(`${this.constructor.name} onPreCheckoutQuery: failed to parse payload: ${e}`);
+        await ctx.answerPreCheckoutQuery(false, 'Ошибка обработки платежа');
+        return;
+      }
+
+      const { tariffId, amount, chatId: payloadChatId } = payloadData;
+      const tariff = getTariffById(tariffId);
+
+      if (!tariff) {
+        this.logger.error(`${this.constructor.name} onPreCheckoutQuery: tariff not found: ${tariffId}`);
+        await ctx.answerPreCheckoutQuery(false, 'Тариф не найден');
+        return;
+      }
+
+      const userId = payloadChatId || chatId;
+      const externalPaymentId = ctx.preCheckoutQuery.id;
+
+      // Создаем запись о платеже
+      await this.paymentProvider.create({
+        chatId: userId,
+        provider: EPaymentProvider.TELEGRAM_STARS,
+        amount: tariff.amount,
+        price: tariff.price,
+        tariffId: tariff.id,
+        externalPaymentId: externalPaymentId,
+        metadata: {
+          currency: ctx.preCheckoutQuery.currency,
+          totalAmount: ctx.preCheckoutQuery.total_amount,
+          invoicePayload: ctx.preCheckoutQuery.invoice_payload,
+        },
+      });
+      
+      await this.analyticsProvider.trackAction(
+        userId,
+        EAnalyticsEventName.PAYMENT_INITIATED,
+        {
+          invoicePayload: ctx.preCheckoutQuery.invoice_payload,
+          currency: ctx.preCheckoutQuery.currency,
+          totalAmount: ctx.preCheckoutQuery.total_amount,
+        },
+      );
 
       // Всегда подтверждаем запрос
       await ctx.answerPreCheckoutQuery(true);
@@ -247,6 +289,74 @@ export class TelegramUpdate {
         this.logger.error(`${this.constructor.name} onSuccessfulPayment: userId is undefined`);
         await ctx.reply('Произошла ошибка при обработке платежа. Обратитесь в поддержку.');
         return;
+      }
+
+      // Обновляем статус платежа на SUCCESS
+      const telegramPaymentId = payment.telegram_payment_charge_id || payment.provider_payment_charge_id;
+      
+      // Пытаемся найти платеж по externalPaymentId (из pre_checkout_query.id)
+      // или по telegram_payment_charge_id
+      let updatedPayment: any = null;
+      
+      if (telegramPaymentId) {
+        updatedPayment = await this.paymentProvider.updateStatusByExternalId(
+          telegramPaymentId,
+          EPaymentProvider.TELEGRAM_STARS,
+          {
+            status: EPaymentStatus.SUCCESS,
+            metadata: {
+              telegramPaymentChargeId: telegramPaymentId,
+              providerPaymentChargeId: payment.provider_payment_charge_id,
+              currency: payment.currency,
+              totalAmount: payment.total_amount,
+            },
+          },
+        );
+      }
+
+      // Если не нашли по externalPaymentId, ищем по chatId + tariffId + статус PENDING
+      if (!updatedPayment) {
+        const pendingPayments = await this.paymentProvider.findByChatId(userId, 10);
+        const pendingPayment = pendingPayments.find(
+          (p) => p.tariffId === tariff.id && p.status === EPaymentStatus.PENDING && p.provider === EPaymentProvider.TELEGRAM_STARS,
+        );
+        
+        if (pendingPayment) {
+          updatedPayment = await this.paymentProvider.updateStatus(
+            pendingPayment._id.toString(),
+            {
+              status: EPaymentStatus.SUCCESS,
+              externalPaymentId: telegramPaymentId,
+              metadata: {
+                telegramPaymentChargeId: telegramPaymentId,
+                providerPaymentChargeId: payment.provider_payment_charge_id,
+                currency: payment.currency,
+                totalAmount: payment.total_amount,
+              },
+            },
+          );
+        }
+      }
+
+      // Если все еще не нашли, создаем новый платеж (на случай, если pre_checkout_query не сработал)
+      if (!updatedPayment) {
+        this.logger.warn(
+          `${this.constructor.name} onSuccessfulPayment: payment record not found, creating new one`,
+        );
+        await this.paymentProvider.create({
+          chatId: userId,
+          provider: EPaymentProvider.TELEGRAM_STARS,
+          amount: tariff.amount,
+          price: tariff.price,
+          tariffId: tariff.id,
+          externalPaymentId: telegramPaymentId,
+          metadata: {
+            telegramPaymentChargeId: telegramPaymentId,
+            providerPaymentChargeId: payment.provider_payment_charge_id,
+            currency: payment.currency,
+            totalAmount: payment.total_amount,
+          },
+        });
       }
 
       // Пополняем баланс

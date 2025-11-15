@@ -11,7 +11,7 @@ export const TARIFFS: Tariff[] = [
     id: 'tariff_1',
     name: '1 обработка',
     amount: 1,
-    price: 10,
+    price: 1,
     label: '🎨 1 за 10⭐',
   },
   {
