@@ -12,6 +12,7 @@ import { deleteFileByRequestId } from '../telegram-module/libs/file-utils';
 import { AnalyticsProvider } from '../analytics-module/analytics.provider';
 import { EAnalyticsEventName } from '../analytics-module/constants/types';
 import * as path from 'path';
+import { escapeText } from 'src/telegram-module/libs/escape-text';
 
 @Processor(REPLICATE_QUEUE)
 export class ReplicateQueueProcessor extends WorkerHost {
@@ -47,8 +48,34 @@ export class ReplicateQueueProcessor extends WorkerHost {
         );
 
         await this.bot.telegram.sendPhoto(chatId, processedFile.output, {
-          caption: '✅ Фото успешно обработано!',
+          caption: '🎨 Раскрашено с помощью @mediaglowupbot',
         });
+
+        const balanceLeft = await this.subscriptionProvider.getBalance(chatId);
+
+        let replyText =
+            '📸 Нравится результат? ' +
+            'Поделись фото с друзьями — пусть тоже попробуют раскрасить свои старые снимки!\n\n' +
+            `💰 Ваш баланс: 🎨 ${balanceLeft} обработок\n\n`;
+
+        if (balanceLeft > 0) {
+          replyText += 'Можешь продолжать — просто отправьте новую фотографию, и я обработаю их автоматически.';
+          
+          await this.bot.telegram.sendMessage(chatId, escapeText(replyText), { parse_mode: 'MarkdownV2' });
+
+          return;
+        } else {
+          replyText += 'Чтобы продолжить работу, пополните баланс — и я смогу обработать следующие фотографии.';
+        
+          this.bot.telegram.sendMessage(chatId, escapeText(replyText), { 
+            parse_mode: 'MarkdownV2',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💳 Пополнить баланс', callback_data: 'refill_balance' }],
+              ],
+            },
+           });
+        }   
 
         if (requestId) {
           await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');

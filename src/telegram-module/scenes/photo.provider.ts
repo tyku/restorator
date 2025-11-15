@@ -1,4 +1,4 @@
-import { Ctx, Message, On, Scene, SceneEnter } from 'nestjs-telegraf';
+import { Action, Ctx, Message, On, Scene, SceneEnter } from 'nestjs-telegraf';
 import { Scenes } from 'telegraf';
 import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
@@ -45,6 +45,15 @@ export class PhotoProvider {
       await this.analyticsProvider.trackSceneEnter(chatId, 'PHOTO_SCENE_ID');
     }
 
+    const balance = await this.subscriptionProvider.getBalance(chatId!);
+
+    if(balance <= 0) {
+      await ctx.scene.leave();
+      await ctx.scene.enter('PAYMENT_SCENE_ID');
+      
+      return;
+    }
+    
     await ctx.replyWithMarkdownV2(
       'Прикрепите одно или несколько фото и нажмите "Обработать ✅", когда будете готовы ',
       {
@@ -160,14 +169,37 @@ export class PhotoProvider {
           },
         );
 
-        await ctx.replyWithPhoto(processedFile.output);
+        await ctx.replyWithPhoto(processedFile.output, {
+          caption: '🎨 Раскрашено с помощью @mediaglowupbot',
+        });
 
-        await ctx.reply('✅ Готово! Вот обновлённое фото 👇\n\n' +
-          '📸 Нравится результат?\n'+
-          'Поделись фото с друзьями — пусть тоже попробуют раскрасить свои старые снимки!'
-        );
 
-        // Удаляем файл из папки uploads после успешной обработки
+        const balanceLeft = await this.subscriptionProvider.getBalance(chat.id);
+
+        let replyText =
+            '📸 Нравится результат? ' +
+            'Поделись фото с друзьями — пусть тоже попробуют раскрасить свои старые снимки!\n\n' +
+            `💰 Ваш баланс: 🎨 ${balanceLeft} обработок\n\n`;
+
+        if (balanceLeft > 0) {
+          replyText += 'Можешь продолжать — просто отправьте новую фотографию, и я обработаю их автоматически.';
+          
+          await ctx.replyWithMarkdownV2(escapeText(replyText));
+
+          return;
+        } else {
+          replyText += 'Чтобы продолжить работу, пополните баланс — и я смогу обработать следующие фотографии.';
+        
+          await ctx.replyWithMarkdownV2(escapeText(replyText), {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '💳 Пополнить баланс', callback_data: 'refill_balance' }],
+              ],
+            },
+          });
+        }        
+
+
         await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
         this.logger.log(`File deleted: ${requestId}.jpg`);
       }
@@ -201,5 +233,25 @@ export class PhotoProvider {
 
       return;
     }
+  }
+
+  @Action('refill_balance')
+  async onAction(@Ctx() ctx: Scenes.SceneContext) {
+    const chatId = ctx.from?.id || ctx.chat?.id;
+    
+    if (chatId) {
+      await this.analyticsProvider.trackButtonClick(
+        chatId,
+        EAnalyticsEventName.PAYMENT_BUTTON,
+      );
+      await this.analyticsProvider.trackSceneLeave(chatId, 'MENU_SCENE_ID');
+    }
+
+    try {
+      await ctx.deleteMessage();
+    } catch (e) {}
+
+    await ctx.scene.leave();
+    await ctx.scene.enter('PAYMENT_SCENE_ID');
   }
 }
