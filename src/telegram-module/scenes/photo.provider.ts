@@ -97,12 +97,18 @@ export class PhotoProvider {
 
     try {
       const balance = await this.subscriptionProvider.getBalance(chat.id);
+      
+      this.logger.log('-----------------------1,', balance);
 
       if (balance <= 0) {
         const paymentSceneShown = (ctx.session as any)?.paymentSceneShown || false;
 
+      this.logger.log('-----------------------2,', paymentSceneShown);
+
+
         if (!paymentSceneShown) {
           (ctx.session as any).paymentSceneShown = true;
+          this.logger.log('-----------------------3,', (ctx.session as any).paymentSceneShown);
           await ctx.scene.leave();
           await ctx.scene.enter('PAYMENT_SCENE_ID');
         }
@@ -113,6 +119,7 @@ export class PhotoProvider {
       // Сбрасываем флаг, если баланс есть (пользователь пополнил)
       if ((ctx.session as any)?.paymentSceneShown) {
         (ctx.session as any).paymentSceneShown = false;
+        this.logger.log('-----------------------4,', (ctx.session as any).paymentSceneShown);
       }
 
       const fileId = photo.file_id;
