@@ -32,17 +32,19 @@ export class SubscriptionProvider {
   }
 
   async sub(chatId: number, amount: number = 1) {
-    const actualBalance = await this.subscriptionRepo.findOne({ chatId, balance: { $gt: 0 } }, { 'balance': 1 }).lean().exec();
+    // Атомарная операция: находим и списываем баланс в одной транзакции
+    // Условие balance >= amount гарантирует, что списание произойдет только если баланса достаточно
+    const result = await this.subscriptionRepo.findOneAndUpdate(
+      { chatId, balance: { $gte: amount } },
+      { $inc: { balance: -amount } },
+    ).exec();
 
-    if (!actualBalance || actualBalance.balance <= 0) {
-      this.logger.error(`Balance less or equal 0 (chatId=${chatId})`);
-
-      // throw new EmptyBalanceException(`Balance less or equal 0 (chatId=${chatId})`);
-
-      return;
+    if (!result) {
+      this.logger.error(`Balance insufficient for subtraction (chatId=${chatId}, amount=${amount})`);
+      return null;
     }
 
-    return this.subscriptionRepo.findOneAndUpdate({ _id: actualBalance._id, chatId }, { $inc: { balance: -amount } })
+    return result;
   }
 
   async getBalance(chatId: number) {

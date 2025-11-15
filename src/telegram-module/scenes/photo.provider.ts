@@ -26,6 +26,8 @@ const getFileName = (path: string = '') => path.split('/').reverse()[0];
 @Scene('PHOTO_SCENE_ID')
 export class PhotoProvider {
   private readonly uploadsDir = path.join(process.cwd(), 'uploads');
+  // Очередь обработки фото для каждого пользователя (chatId -> Promise)
+  private readonly processingQueues = new Map<number, Promise<void>>();
 
   constructor(
     private fileProvider: FilesProvider,
@@ -74,12 +76,29 @@ export class PhotoProvider {
   ) {
     const isImage = document.mime_type.startsWith('image/');
 
-      if (!isImage) {
-        await ctx.reply('Файл не является фотографией 😳');
-
-        return;
+    if (!isImage) {
+      await ctx.reply('Файл не является фотографией 😳');
+      return;
+    }
+    
+    // Добавляем обработку в очередь для этого пользователя
+    const currentQueue = this.processingQueues.get(chat.id) || Promise.resolve();
+    
+    const newQueue = currentQueue.then(async () => {
+      try {
+        await this.processFile(ctx, chat, document);
+      } catch (e) {
+        this.logger.error(`${this.constructor.name} onDocument queue error: ${e}`);
+      } finally {
+        // Удаляем очередь, если она завершилась
+        if (this.processingQueues.get(chat.id) === newQueue) {
+          this.processingQueues.delete(chat.id);
+        }
       }
-      await this.processFile(ctx, chat, document)
+    });
+    
+    this.processingQueues.set(chat.id, newQueue);
+    await newQueue;
   }
 
   @On('photo')
@@ -89,26 +108,40 @@ export class PhotoProvider {
     @Message('photo') photo: Record<string, any>,
   ) {
     const origFile = photo.reverse()[0];
-    await this.processFile(ctx, chat, origFile);
+    
+    // Добавляем обработку в очередь для этого пользователя
+    const currentQueue = this.processingQueues.get(chat.id) || Promise.resolve();
+    
+    const newQueue = currentQueue.then(async () => {
+      try {
+        await this.processFile(ctx, chat, origFile);
+      } catch (e) {
+        this.logger.error(`${this.constructor.name} onPhoto queue error: ${e}`);
+      } finally {
+        // Удаляем очередь, если она завершилась
+        if (this.processingQueues.get(chat.id) === newQueue) {
+          this.processingQueues.delete(chat.id);
+        }
+      }
+    });
+    
+    this.processingQueues.set(chat.id, newQueue);
+    await newQueue;
   }
 
   private async processFile(ctx: Scenes.SceneContext, chat: TChat, photo: Record<string, any>) {
     const requestId = generateContextId();
 
     try {
+      // Проверяем баланс перед началом обработки
       const balance = await this.subscriptionProvider.getBalance(chat.id);
       
-      this.logger.log('-----------------------1,', balance);
-
       if (balance <= 0) {
+        // Баланса не хватает - проверяем, показывали ли уже сцену оплаты
         const paymentSceneShown = (ctx.session as any)?.paymentSceneShown || false;
-
-      this.logger.log('-----------------------2,', paymentSceneShown);
-
 
         if (!paymentSceneShown) {
           (ctx.session as any).paymentSceneShown = true;
-          this.logger.log('-----------------------3,', (ctx.session as any).paymentSceneShown);
           await ctx.scene.leave();
           await ctx.scene.enter('PAYMENT_SCENE_ID');
         }
@@ -119,7 +152,6 @@ export class PhotoProvider {
       // Сбрасываем флаг, если баланс есть (пользователь пополнил)
       if ((ctx.session as any)?.paymentSceneShown) {
         (ctx.session as any).paymentSceneShown = false;
-        this.logger.log('-----------------------4,', (ctx.session as any).paymentSceneShown);
       }
 
       const fileId = photo.file_id;
@@ -175,7 +207,14 @@ export class PhotoProvider {
       );
 
       if (processedFile.status === 'succeeded') {
-        await this.subscriptionProvider.sub(chat.id, 1);
+        // Списываем баланс атомарно только после успешной обработки
+        // Очередь гарантирует последовательную обработку, атомарная операция - корректное списание
+        const subscriptionResult = await this.subscriptionProvider.sub(chat.id, 1);
+        
+        if (!subscriptionResult) {
+          // Если баланс закончился во время обработки, логируем, но результат уже готов
+          this.logger.warn(`Balance was insufficient after processing (chatId=${chat.id}, requestId=${requestId})`);
+        }
 
         await this.analyticsProvider.trackAction(
           chat.id,
