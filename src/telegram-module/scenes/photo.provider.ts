@@ -1,16 +1,10 @@
 import { Action, Ctx, Message, On, Scene, SceneEnter } from 'nestjs-telegraf';
 import { Scenes } from 'telegraf';
 import { v4 as uuidv4 } from 'uuid';
-import * as path from 'path';
 
-import { FilesProvider } from '../../files-module/files.provider';
 import { LoggerProvider } from '../../logger-module/logger.provider';
-import { escapeText } from '../libs/escape-text';
 import { SubscriptionProvider } from 'src/subscription-module/subscription.provider';
-import { EmptyBalanceException } from 'src/subscription-module/errors/empty-balance.error';
-import { saveFile, deleteFileByRequestId, localFileToDataUrl } from '../libs/file-utils';
-import { FileDownloaderProvider, ReplicateService } from 'src/services/providers';
-import { ReplicateQueueService } from 'src/queue-module/replicate-queue.service';
+import { PhotoQueueService } from 'src/queue-module/photo-queue.service';
 import { AnalyticsProvider } from 'src/analytics-module/analytics.provider';
 import { EAnalyticsEventName } from 'src/analytics-module/constants/types';
 
@@ -21,21 +15,12 @@ type TChat = {
 
 const generateContextId = () => uuidv4();
 
-const getFileName = (path: string = '') => path.split('/').reverse()[0];
-
 @Scene('PHOTO_SCENE_ID')
 export class PhotoProvider {
-  private readonly uploadsDir = path.join(process.cwd(), 'uploads');
-  // Очередь обработки фото для каждого пользователя (chatId -> Promise)
-  private readonly processingQueues = new Map<number, Promise<void>>();
-
   constructor(
-    private fileProvider: FilesProvider,
     private subscriptionProvider: SubscriptionProvider,
     private logger: LoggerProvider,
-    private replicateProvider: ReplicateService,
-    private fileDownloaderProvider: FileDownloaderProvider,
-    private replicateQueueService: ReplicateQueueService,
+    private photoQueueService: PhotoQueueService,
     private analyticsProvider: AnalyticsProvider,
   ) {}
 
@@ -80,25 +65,8 @@ export class PhotoProvider {
       await ctx.reply('Файл не является фотографией 😳');
       return;
     }
-    
-    // Добавляем обработку в очередь для этого пользователя
-    const currentQueue = this.processingQueues.get(chat.id) || Promise.resolve();
-    
-    const newQueue = currentQueue.then(async () => {
-      try {
-        await this.processFile(ctx, chat, document);
-      } catch (e) {
-        this.logger.error(`${this.constructor.name} onDocument queue error: ${e}`);
-      } finally {
-        // Удаляем очередь, если она завершилась
-        if (this.processingQueues.get(chat.id) === newQueue) {
-          this.processingQueues.delete(chat.id);
-        }
-      }
-    });
-    
-    this.processingQueues.set(chat.id, newQueue);
-    await newQueue;
+
+    await this.handlePhoto(ctx, chat, document);
   }
 
   @On('photo')
@@ -108,34 +76,18 @@ export class PhotoProvider {
     @Message('photo') photo: Record<string, any>,
   ) {
     const origFile = photo.reverse()[0];
-    
-    // Добавляем обработку в очередь для этого пользователя
-    const currentQueue = this.processingQueues.get(chat.id) || Promise.resolve();
-    
-    const newQueue = currentQueue.then(async () => {
-      try {
-        await this.processFile(ctx, chat, origFile);
-      } catch (e) {
-        this.logger.error(`${this.constructor.name} onPhoto queue error: ${e}`);
-      } finally {
-        // Удаляем очередь, если она завершилась
-        if (this.processingQueues.get(chat.id) === newQueue) {
-          this.processingQueues.delete(chat.id);
-        }
-      }
-    });
-    
-    this.processingQueues.set(chat.id, newQueue);
-    await newQueue;
+    await this.handlePhoto(ctx, chat, origFile);
   }
 
-  private async processFile(ctx: Scenes.SceneContext, chat: TChat, photo: Record<string, any>) {
-    const requestId = generateContextId();
-
+  private async handlePhoto(
+    ctx: Scenes.SceneContext,
+    chat: TChat,
+    photo: Record<string, any>,
+  ) {
     try {
-      // Проверяем баланс перед началом обработки
+      // Проверяем баланс перед добавлением в очередь
       const balance = await this.subscriptionProvider.getBalance(chat.id);
-      
+
       if (balance <= 0) {
         // Баланса не хватает - проверяем, показывали ли уже сцену оплаты
         const paymentSceneShown = (ctx.session as any)?.paymentSceneShown || false;
@@ -145,7 +97,7 @@ export class PhotoProvider {
           await ctx.scene.leave();
           await ctx.scene.enter('PAYMENT_SCENE_ID');
         }
-        
+
         return;
       }
 
@@ -154,142 +106,38 @@ export class PhotoProvider {
         (ctx.session as any).paymentSceneShown = false;
       }
 
+      const requestId = generateContextId();
       const fileId = photo.file_id;
       const fileLink = await ctx.telegram.getFileLink(fileId);
 
-      // Генерируем уникальное имя файла и сохраняем в локальную папку
-      const fileName = `${requestId}.jpg`;
-
-      const downloadedFile = await this.fileDownloaderProvider.getFile(fileLink.href);
-      const localFilePath = await saveFile(
-        downloadedFile,
-        this.uploadsDir,
-        fileName,
-      );
-
-      this.logger.log(`Photo saved to: ${localFilePath}`);
-
-      await this.fileProvider.create({
+      // Добавляем задачу в очередь BullMQ
+      // BullMQ гарантирует последовательную обработку (concurrency: 1)
+      await this.photoQueueService.addJob({
         chatId: chat.id,
+        fileId,
+        fileLink: fileLink.href,
         requestId,
-        href: fileLink.href,
       });
 
-      await this.analyticsProvider.trackAction(
-        chat.id,
-        EAnalyticsEventName.PHOTO_UPLOADED,
-        {
-          requestId,
-          fileId,
-        },
+      this.logger.log(
+        `Photo processing job added to queue (chatId=${chat.id}, requestId=${requestId})`,
       );
-
-      // Преобразуем локальный файл в base64 data URL
-      const dataUrl = await localFileToDataUrl(localFilePath);
-
-      const processedFile = await this.replicateProvider.colorizePhoto(dataUrl);
-
-      if(processedFile.status === 'failed') {
-        await ctx.reply('Что-то пошло не так, но мы уже изучаем вопрос');
-        return;
-      }
-
-      await ctx.replyWithMarkdownV2(
-        escapeText('📸 Отлично! Фото принято в работу.\n\n' +
-                    '⏳ Обработка займёт около минуты — нейросеть уже раскрашивает твоё фото.'),
-        {
-          reply_markup: {
-            keyboard: [[{ text: '📱️Меню' }]],
-            resize_keyboard: true,
-            one_time_keyboard: false,
-          },
-        },
-      );
-
-      if (processedFile.status === 'succeeded') {
-        // Списываем баланс атомарно только после успешной обработки
-        // Очередь гарантирует последовательную обработку, атомарная операция - корректное списание
-        const subscriptionResult = await this.subscriptionProvider.sub(chat.id, 1);
-        
-        if (!subscriptionResult) {
-          // Если баланс закончился во время обработки, логируем, но результат уже готов
-          this.logger.warn(`Balance was insufficient after processing (chatId=${chat.id}, requestId=${requestId})`);
-        }
-
-        await this.analyticsProvider.trackAction(
-          chat.id,
-          EAnalyticsEventName.PHOTO_PROCESSED,
-          {
-            requestId,
-            status: 'succeeded',
-          },
-        );
-
-        await ctx.replyWithPhoto(processedFile.output, {
-          caption: '🎨 Раскрашено с помощью @mediaglowupbot',
-        });
-
-
-        const balanceLeft = await this.subscriptionProvider.getBalance(chat.id);
-
-        let replyText =
-            '📸 Нравится результат? ' +
-            'Поделись фото с друзьями — пусть тоже попробуют раскрасить свои старые снимки!\n\n' +
-            `💰 Ваш баланс: 🎨 ${balanceLeft} обработок\n\n`;
-
-        if (balanceLeft > 0) {
-          replyText += 'Можешь продолжать — просто отправьте новую фотографию, и я обработаю их автоматически.';
-          
-          await ctx.replyWithMarkdownV2(escapeText(replyText));
-
-          return;
-        } else {
-          replyText += 'Чтобы продолжить работу, пополните баланс — и я смогу обработать следующие фотографии.';
-        
-          await ctx.replyWithMarkdownV2(escapeText(replyText), {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '💳 Пополнить баланс', callback_data: 'refill_balance' }],
-              ],
-            },
-          });
-        }        
-
-
-        await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
-        this.logger.log(`File deleted: ${requestId}.jpg`);
-      }
-
-      if (processedFile.status === 'processing') {
-        await ctx.reply('Фотография обрабатывается... Скоро она будет готова');
-        await this.replicateQueueService.addJob({
-          predictionId: processedFile.id,
-          chatId: chat.id,
-          requestId: requestId,
-        });
-
-        return;
-      }
     } catch (e) {
-      this.logger.error(`${this.constructor.name} onDocument: ${e}`);
+      this.logger.error(`${this.constructor.name} handlePhoto error: ${e}`);
 
       await this.analyticsProvider.trackError(
         chat.id,
         EAnalyticsEventName.PROCESSING_ERROR,
         e instanceof Error ? e : new Error(String(e)),
         {
-          requestId,
-          action: 'process_file',
+          action: 'handle_photo',
         },
       );
 
-      await deleteFileByRequestId(requestId, this.uploadsDir, '.jpg');
-
       await ctx.reply('Что-то пошло не так, но мы уже изучаем вопрос');
-
-      return;
     }
   }
+
 
   @Action('refill_balance')
   async onAction(@Ctx() ctx: Scenes.SceneContext) {
