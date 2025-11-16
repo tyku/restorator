@@ -34,45 +34,11 @@ export class MenuProvider {
         await this.analyticsProvider.trackSceneEnter(chatId, 'MENU_SCENE_ID');
       }
 
-      const replyText = 
-          'Просто отправь мне фото или документ — я всё сделаю автоматически.\n\n' +
-          '*❗️Чтобы получить лучший результат, отправляй фотографии в исходном качестве, без сжатия (как документ)*\n\n' +
-          'Примеры результатов 👇';
-
-      await ctx.replyWithMarkdownV2(escapeText(replyText));
-
-      const mediaGroup: InputMediaPhoto[] = [
-        {
-          type: 'photo',
-          media: Input.fromLocalFile(path.join(__dirname, 'photos', '1.png')),
-          caption: 'Исходное фото',
-        },
-        {
-          type: 'photo',
-          media: Input.fromLocalFile(path.join(__dirname, 'photos', '1_c.png')),
-          caption: 'Отреставрированное фото',
-        },
-      ];
-
-      // const mediaGroup2: InputMediaPhoto[] = [
-      //   {
-      //     type: 'photo',
-      //     media: Input.fromLocalFile(path.join(__dirname, '..', '..', '..', 'photos', '2.jpg')),
-      //   },
-      //   {
-      //     type: 'photo',
-      //     media: Input.fromLocalFile(path.join(__dirname, '..', '..', '..', 'photos', '2_c.png')),
-      //   },
-      // ];
-
-      // await ctx.telegram.sendMediaGroup(chatId, mediaGroup);
-      // await ctx.telegram.sendMediaGroup(chatId, mediaGroup2);
-
       const balance = await this.subscriptionProvider.getBalance(chatId);
 
       await ctx.replyWithMarkdownV2(
           escapeText(`💰 Текущий баланс: 🎨 ${balance} обработок\n\n` +
-              '📷 Чтобы получить лучший результат, отправляй фотографии в исходном качестве, без сжатия — как документ. ✨\n' +
+              '📷 Что бы получить лучший результат, отправляй фотографии в исходном качестве, без сжатия — как документ. ✨\n' +
               'Ты можешь отправлять сразу несколько фото — каждое обработается по очереди автоматически. Просто загрузи их в чат 👇'),
           {
             reply_markup: {
